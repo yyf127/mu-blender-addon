@@ -621,24 +621,28 @@ class TestBMDReaderIntegration(unittest.TestCase):
 
 
 class TestBMDReaderEncryption(unittest.TestCase):
-    """Test that encrypted versions raise appropriate errors (for now)."""
+    """Test that encrypted versions can be decrypted."""
 
-    def test_v12_raises(self) -> None:
-        """Version 0x0C (FileCryptor) should raise NotImplemented."""
-        # Need >= 8 bytes to pass size check, with < 8 encrypted payload
+    def test_v12_decrypt(self) -> None:
+        """Version 0x0C (FileCryptor) should decrypt without error."""
         data = b"BMD" + _build("B", 0x0C) + _build("I", 4) + b"\x00" * 4
         reader = BMDReader()
-        with self.assertRaises(BinaryReaderError) as ctx:
+        # Decryption will succeed, but parsing will fail because the
+        # decrypted data isn't a valid BMD.  We assert it's NOT the
+        # old "not yet implemented" error.
+        try:
             reader.Read(data)
-        self.assertIn("FileCryptor", str(ctx.exception))
+        except BinaryReaderError as e:
+            self.assertNotIn("not yet implemented", str(e))
 
-    def test_v15_raises(self) -> None:
-        """Version 0x0F (LEA-256) should raise NotImplemented."""
+    def test_v15_decrypt(self) -> None:
+        """Version 0x0F (LEA-256) should decrypt without error."""
         data = b"BMD" + _build("B", 0x0F) + _build("I", 4) + b"\x00" * 4
         reader = BMDReader()
-        with self.assertRaises(BinaryReaderError) as ctx:
+        try:
             reader.Read(data)
-        self.assertIn("LEA-256", str(ctx.exception))
+        except BinaryReaderError as e:
+            self.assertNotIn("not yet implemented", str(e))
 
 
 # ======================================================================

@@ -225,7 +225,7 @@ class BMDReader:
             )
 
     # ------------------------------------------------------------------
-    # Decryption (placeholder)
+    # Decryption
     # ------------------------------------------------------------------
 
     @staticmethod
@@ -234,31 +234,48 @@ class BMDReader:
 
         C#: ``DecryptBufferIfNeeded(byte[] buffer, byte version)``
 
-        Version 0x0C → FileCryptor
-        Version 0x0F → LEA-256
+        Version 0x0C → FileCryptor (XOR-based)
+        Version 0x0F → LEA-256 (128-bit block cipher, 256-bit key)
 
-        Current implementation is a placeholder — actual decryption
-        will be wired in when the crypto module is implemented.
+        Encrypted layout (from C# reference):
+            offset 4:  encrypted size (Int32, little-endian)
+            offset 8:  encrypted payload of *size* bytes
+            After decryption the plain data is written back at offset 4.
         """
         if version not in (0x0C, 0x0F):
             return  # plain — nothing to do
 
-        # Encrypted layout:
-        #   offset 4:  encrypted size (Int32)
-        #   offset 8:  encrypted payload
-        #
-        # After decryption, the plain data replaces the region at offset 4.
-        # For now we raise with a clear message.
+        # The raw buffer is accessible via PeekBytes
+        raw = bytearray(br.PeekBytes(br.Size))
+
+        # Read encrypted size at offset 4 (little-endian Int32)
+        import struct as _struct
+        enc_size = _struct.unpack_from("<I", raw, 4)[0]
+        enc_end = 8 + enc_size  # data at offset 8..(8+enc_size-1)
+
+        # Read encrypted payload
+        enc_bytes = bytes(raw[8:enc_end])
+
+        # Decrypt
         if version == 0x0C:
-            raise BinaryReaderError(
-                "BMD version 0x0C uses FileCryptor encryption — "
-                "not yet implemented."
-            )
+            from ._file_cryptor import decrypt as _file_decrypt
+            dec_bytes = _file_decrypt(enc_bytes)
         elif version == 0x0F:
+            from ._lea_cipher import lea256_decrypt
+            dec_bytes = lea256_decrypt(enc_bytes)
+        else:
             raise BinaryReaderError(
-                "BMD version 0x0F uses LEA-256 encryption — "
-                "not yet implemented."
+                f"Unsupported encryption version 0x{version:02X}"
             )
+
+        # Replace encrypted region with decrypted data
+        raw[4:4 + len(dec_bytes)] = dec_bytes
+
+        # Create a fresh BinaryReader with the decrypted buffer
+        new_br = BinaryReader(bytes(raw))
+        br._buffer = new_br._buffer
+        br._size = new_br._size
+        br._offset = 0
 
     # ------------------------------------------------------------------
     # Mesh reading
