@@ -167,13 +167,17 @@ class BMDReader:
         # After ValidateHeader consumed 3 magic bytes, offset is at 3 (version byte)
         version = br.PeekBytes(1)[0]
 
+        # Snapshot the full raw buffer BEFORE any decryption or seeking,
+        # so _DecryptIfNeeded has access to the original encrypted content.
+        _raw_buffer: bytes = br.PeekBytes(br.Remaining)  # bytes at offset 3..end
+
         if version not in SUPPORTED_VERSIONS:
             raise BinaryReaderError(
                 f"Unsupported BMD version 0x{version:02X}. "
                 f"Supported: {[f'0x{v:02X}' for v in SUPPORTED_VERSIONS]}"
             )
 
-        self._DecryptIfNeeded(br, version)
+        self._DecryptIfNeeded(br, version, _raw_buffer)
 
         # After decryption (or skip of 4-byte header), read from offset 4
         br.Seek(4, SeekOrigin.Begin)
@@ -229,7 +233,10 @@ class BMDReader:
     # ------------------------------------------------------------------
 
     @staticmethod
-    def _DecryptIfNeeded(br: BinaryReader, version: int) -> None:
+    def _DecryptIfNeeded(
+        br: BinaryReader, version: int,
+        raw_from_offset_3: bytes,
+    ) -> None:
         """Decrypt the buffer in-place if the version requires it.
 
         C#: ``DecryptBufferIfNeeded(byte[] buffer, byte version)``
@@ -241,12 +248,22 @@ class BMDReader:
             offset 4:  encrypted size (Int32, little-endian)
             offset 8:  encrypted payload of *size* bytes
             After decryption the plain data is written back at offset 4.
+
+        Args:
+            br: BinaryReader positioned at offset 3 (version byte).
+            version: BMD format version (0x0C or 0x0F).
+            raw_from_offset_3: Snapshot of the buffer from offset 3 onward,
+                taken before any decryption or seeking.
         """
         if version not in (0x0C, 0x0F):
             return  # plain — nothing to do
 
-        # The raw buffer is accessible via PeekBytes
-        raw = bytearray(br.PeekBytes(br.Size))
+        # The version byte is the first byte of raw_from_offset_3.
+        # Reconstruct the full original buffer:
+        #   bytes 0-2: "BMD" (we peeked them earlier, prepend them)
+        #   bytes 3..: raw_from_offset_3
+        full_raw = b"BMD" + raw_from_offset_3
+        raw = bytearray(full_raw)
 
         # Read encrypted size at offset 4 (little-endian Int32)
         import struct as _struct
@@ -255,6 +272,13 @@ class BMDReader:
 
         # Read encrypted payload
         enc_bytes = bytes(raw[8:enc_end])
+
+        # Validate payload size
+        if version == 0x0F and len(enc_bytes) % 16 != 0:
+            raise BinaryReaderError(
+                f"LEA-256 encrypted payload size ({len(enc_bytes)}) "
+                f"is not a multiple of 16 — file may be corrupted"
+            )
 
         # Decrypt
         if version == 0x0C:
