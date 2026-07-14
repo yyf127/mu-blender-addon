@@ -1,0 +1,376 @@
+using System;
+using System.Buffers;
+using System.Collections.Generic;
+using System.Text;
+using Client.Main.Core.Client;
+using MUnique.OpenMU.Network.Packets;
+using MUnique.OpenMU.Network.Packets.ClientToServer;
+using MUnique.OpenMU.Network.Packets.ConnectServer;
+
+namespace Client.Main.Networking.PacketHandling
+{
+    /// <summary>
+    /// Builds outgoing network packets for game and connect server communication.
+    /// </summary>
+    public static class PacketBuilder
+    {
+        // ──────────────────────── Game Server Packets ─────────────────────────
+
+        /// <summary>
+        /// Builds a login packet using the long-password format.
+        /// </summary>
+        public static int BuildLoginPacket(
+            IBufferWriter<byte> writer,
+            string username,
+            string password,
+            byte[] clientVersion,
+            byte[] clientSerial,
+            byte[] xor3Keys)
+        {
+            int length = LoginLongPassword.Length;
+            var memory = writer.GetMemory(length).Slice(0, length);
+            var packet = new LoginLongPassword(memory);
+
+            // Prepare spans to avoid allocations
+            Span<byte> userSpan = stackalloc byte[packet.Username.Length];
+            Span<byte> passSpan = stackalloc byte[packet.Password.Length];
+
+            Encoding.ASCII.GetBytes(username, userSpan);
+            Encoding.ASCII.GetBytes(password, passSpan);
+
+            userSpan.CopyTo(packet.Username);
+            passSpan.CopyTo(packet.Password);
+
+            // XOR3 encryption in-place
+            EncryptXor3(packet.Username, xor3Keys);
+            EncryptXor3(packet.Password, xor3Keys);
+
+            packet.TickCount = (uint)Environment.TickCount;
+            clientVersion.CopyTo(packet.ClientVersion);
+            clientSerial.CopyTo(packet.ClientSerial);
+
+            return length;
+        }
+
+        /// <summary>
+        /// Builds a packet requesting the character list.
+        /// </summary>
+        public static int BuildRequestCharacterListPacket(IBufferWriter<byte> writer)
+        {
+            int length = RequestCharacterList.Length;
+            var memory = writer.GetMemory(length).Slice(0, length);
+            _ = new RequestCharacterList(memory);
+            return length;
+        }
+
+        /// <summary>
+        /// Builds a packet for sending a public chat message.
+        /// </summary>
+        public static int BuildPublicChatMessagePacket(
+            IBufferWriter<byte> writer,
+            string characterName,
+            string message)
+        {
+            int messageBytes = Encoding.UTF8.GetByteCount(message);
+            int length = PublicChatMessage.GetRequiredSize(messageBytes);
+            var memory = writer.GetMemory(length).Slice(0, length);
+            var packet = new PublicChatMessage(memory);
+
+            packet.Character = characterName;
+            packet.Message = message;
+            return length;
+        }
+
+        /// <summary>
+        /// Builds a whisper (private chat) packet.
+        /// </summary>
+        public static int BuildWhisperMessagePacket(
+            IBufferWriter<byte> writer,
+            string receiverName,
+            string message)
+        {
+            int messageBytes = Encoding.UTF8.GetByteCount(message);
+            int length = WhisperMessage.GetRequiredSize(messageBytes);
+            var memory = writer.GetMemory(length).Slice(0, length);
+            var packet = new WhisperMessage(memory);
+
+            packet.ReceiverName = receiverName;
+            packet.Message = message;
+            return length;
+        }
+
+        /// <summary>
+        /// Builds a packet to select a character by name.
+        /// </summary>
+        public static int BuildSelectCharacterPacket(
+            IBufferWriter<byte> writer,
+            string characterName)
+        {
+            int length = SelectCharacter.Length;
+            var memory = writer.GetMemory(length).Slice(0, length);
+            var packet = new SelectCharacter(memory);
+
+            packet.Name = characterName;
+            return length;
+        }
+
+        /// <summary>
+        /// Builds a logout request packet with the specified logout type.
+        /// </summary>
+        public static int BuildLogoutRequestPacket(
+            IBufferWriter<byte> writer,
+            LogOutType type)
+        {
+            int length = LogOut.Length;
+            var memory = writer.GetMemory(length).Slice(0, length);
+            var packet = new LogOut(memory);
+
+            packet.Type = type;
+            return length;
+        }
+
+        public static int BuildClientReadyAfterMapChangePacket(IBufferWriter<byte> writer)
+        {
+            int length = ClientReadyAfterMapChange.Length;
+            var memory = writer.GetMemory(length).Slice(0, length);
+            _ = new ClientReadyAfterMapChange(memory);
+            return length;
+        }
+
+        /// <summary>
+        /// Builds a packet for an instant move (teleport) request.
+        /// </summary>
+        public static int BuildInstantMoveRequestPacket(
+            IBufferWriter<byte> writer,
+            byte x,
+            byte y)
+        {
+            int length = InstantMoveRequest.Length;
+            var memory = writer.GetMemory(length).Slice(0, length);
+            var packet = new InstantMoveRequest(memory);
+
+            packet.TargetX = x;
+            packet.TargetY = y;
+            return length;
+        }
+
+        /// <summary>
+        /// Builds a walk request packet with a sequence of direction steps.
+        /// </summary>
+        public static int BuildWalkRequestPacket(
+            IBufferWriter<byte> writer,
+            byte startX,
+            byte startY,
+            byte[] path)
+        {
+            if (path == null || path.Length == 0)
+                return 0;
+
+            int stepsBytes = (path.Length + 1) / 2;
+            int length = WalkRequest.GetRequiredSize(stepsBytes);
+            var memory = writer.GetMemory(length).Slice(0, length);
+            var packet = new WalkRequest(memory);
+
+            packet.SourceX = startX;
+            packet.SourceY = startY;
+            packet.StepCount = (byte)path.Length;
+            packet.TargetRotation = path[path.Length - 1];
+
+            var directions = packet.Directions;
+            int idx = 0;
+            for (int i = 0; i < stepsBytes; i++)
+            {
+                byte high = idx < path.Length ? path[idx++] : (byte)0x0F;
+                byte low = idx < path.Length ? path[idx++] : (byte)0x0F;
+                directions[i] = (byte)((high << 4) | (low & 0x0F));
+            }
+
+            return length;
+        }
+
+        /// <summary>
+        /// Builds a packet requesting to pick up an item by ID.
+        /// </summary>
+        public static int BuildPickupItemRequestPacket(
+            IBufferWriter<byte> writer,
+            ushort itemId,
+            TargetProtocolVersion version)
+        {
+            if (version == TargetProtocolVersion.Version097 ||
+                version == TargetProtocolVersion.Season6)
+            {
+                int length = PickupItemRequest.Length;
+                var memory = writer.GetMemory(length).Slice(0, length);
+                var packet = new PickupItemRequest(memory);
+                packet.ItemId = itemId;
+                return length;
+            }
+            else
+            {
+                int length = PickupItemRequest075.Length;
+                var memory = writer.GetMemory(length).Slice(0, length);
+                var packet = new PickupItemRequest075(memory);
+                packet.ItemId = itemId;
+                return length;
+            }
+        }
+
+        /// <summary>
+        /// Builds a packet requesting to drop an inventory item onto the ground at the specified map tile.
+        /// </summary>
+        /// <param name="writer">The buffer writer.</param>
+        /// <param name="tileX">Target tile X on the map.</param>
+        /// <param name="tileY">Target tile Y on the map.</param>
+        /// <param name="inventorySlot">Inventory slot index (including server offset).</param>
+        /// <returns>The length of the built packet.</returns>
+        public static int BuildDropItemRequestPacket(
+            IBufferWriter<byte> writer,
+            byte tileX,
+            byte tileY,
+            byte inventorySlot)
+        {
+            int length = DropItemRequest.Length;
+            var memory = writer.GetMemory(length).Slice(0, length);
+            var packet = new DropItemRequest(memory);
+            packet.TargetX = tileX;
+            packet.TargetY = tileY;
+            packet.ItemSlot = inventorySlot;
+            return length;
+        }
+
+        /// <summary>
+        /// Builds a packet to request an animation or rotation.
+        /// </summary>
+        public static int BuildAnimationRequestPacket(
+            IBufferWriter<byte> writer,
+            byte rotation,
+            byte animationNumber)
+        {
+            int length = AnimationRequest.Length;
+            var memory = writer.GetMemory(length).Slice(0, length);
+            var packet = new AnimationRequest(memory);
+
+            packet.Rotation = rotation;
+            packet.AnimationNumber = animationNumber;
+            return length;
+        }
+
+        /// <summary>
+        /// Builds an ItemMoveRequest (with item data), typically for Season 6.
+        /// </summary>
+        /// <param name="writer">Output writer.</param>
+        /// <param name="fromStorage">Source storage kind.</param>
+        /// <param name="fromSlot">Source slot.</param>
+        /// <param name="itemData">Item raw data (expected length 12 for S6).</param>
+        /// <param name="toStorage">Target storage kind.</param>
+        /// <param name="toSlot">Target slot.</param>
+        /// <returns>Packet length.</returns>
+        public static int BuildItemMoveRequestPacket(
+            IBufferWriter<byte> writer,
+            ItemStorageKind fromStorage,
+            byte fromSlot,
+            ReadOnlySpan<byte> itemData,
+            ItemStorageKind toStorage,
+            byte toSlot)
+        {
+            int length = ItemMoveRequest.Length;
+            var memory = writer.GetMemory(length).Slice(0, length);
+            var packet = new ItemMoveRequest(memory);
+            packet.FromStorage = fromStorage;
+            packet.FromSlot = fromSlot;
+            // ItemData must fit into the packet span (12 bytes expected on S6)
+            var dest = packet.ItemData;
+            itemData.Slice(0, Math.Min(dest.Length, itemData.Length)).CopyTo(dest);
+            packet.ToStorage = toStorage;
+            packet.ToSlot = toSlot;
+            return length;
+        }
+
+        /// <summary>
+        /// Builds a short ItemMoveRequestExtended (storages + slots only).
+        /// </summary>
+        public static int BuildItemMoveRequestExtendedPacket(
+            IBufferWriter<byte> writer,
+            ItemStorageKind fromStorage,
+            byte fromSlot,
+            ItemStorageKind toStorage,
+            byte toSlot)
+        {
+            int length = ItemMoveRequestExtended.Length;
+            var memory = writer.GetMemory(length).Slice(0, length);
+            var packet = new ItemMoveRequestExtended(memory);
+            packet.FromStorage = fromStorage;
+            packet.FromSlot = fromSlot;
+            packet.ToStorage = toStorage;
+            packet.ToSlot = toSlot;
+            return length;
+        }
+
+
+        /// <summary>
+        /// Builds a skill usage request packet using TargetedSkill.
+        /// </summary>
+        public static int BuildSkillRequestPacket(
+            IBufferWriter<byte> writer,
+            ushort skillId,
+            ushort targetId)
+        {
+            int length = TargetedSkill.Length;
+            var memory = writer.GetMemory(length).Slice(0, length);
+            var packet = new TargetedSkill(memory);
+
+            packet.SkillId = skillId;
+            packet.TargetId = targetId;
+
+            return length;
+        }
+
+
+        /// <summary>
+        /// Builds an area skill hit packet (damage application) for Season 6+ (C3 DB).
+        /// </summary>
+        public static int BuildAreaSkillHitPacket(
+            IBufferWriter<byte> writer,
+            ushort skillId,
+            byte targetX,
+            byte targetY,
+            byte hitCounter,
+            IReadOnlyList<ushort> targetIds,
+            byte animationCounter)
+        {
+            int targetCount = Math.Min(targetIds?.Count ?? 0, byte.MaxValue);
+            int length = AreaSkillHit.GetRequiredSize(targetCount);
+            var memory = writer.GetMemory(length).Slice(0, length);
+            var packet = new AreaSkillHit(memory);
+
+            packet.SkillId = skillId;
+            packet.TargetX = targetX;
+            packet.TargetY = targetY;
+            packet.HitCounter = hitCounter;
+            packet.TargetCount = (byte)targetCount;
+
+            for (int i = 0; i < targetCount; i++)
+            {
+                var target = packet[i];
+                target.TargetId = targetIds[i];
+                target.AnimationCounter = animationCounter;
+            }
+
+            return length;
+        }
+
+
+        // ──────────────────────────── Helpers ─────────────────────────────
+
+        /// <summary>
+        /// Applies XOR-3 encryption to the provided span in place.
+        /// </summary>
+        private static void EncryptXor3(Span<byte> data, byte[] xor3Keys)
+        {
+            for (int i = 0; i < data.Length; i++)
+            {
+                data[i] ^= xor3Keys[i % 3];
+            }
+        }
+    }
+}

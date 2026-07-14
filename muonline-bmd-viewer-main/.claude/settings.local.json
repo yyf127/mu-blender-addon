@@ -1,0 +1,38 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm run build:*)",
+      "Bash(npm run dist:*)",
+      "Bash(dir:*)",
+      "Bash(npx npm-check-updates)",
+      "Bash(npx npm-check-updates:*)",
+      "Bash(npm install)",
+      "Bash(npm audit fix:*)",
+      "Bash(npx tsc:*)",
+      "Bash(find:*)",
+      "Bash(npm test:*)",
+      "Bash(npm install:*)",
+      "Bash(npx vite build:*)",
+      "Bash(xargs grep:*)",
+      "Bash(npx jest:*)",
+      "Bash(npm run:*)",
+      "mcp__plugin_playwright_playwright__browser_navigate",
+      "mcp__plugin_playwright_playwright__browser_take_screenshot",
+      "Bash(node -e ':*)",
+      "Bash(node -e ' *)",
+      "Bash(npx tsx *)",
+      "Bash(export CLAUDE_PLUGIN_ROOT=/root/.claude/plugins/cache/thedotmack/claude-mem/8.0.6)",
+      "Bash(node /root/.claude/plugins/cache/thedotmack/claude-mem/8.0.6/scripts/smart-install.js)",
+      "Bash(node /root/.claude/plugins/cache/thedotmack/claude-mem/8.0.6/scripts/context-hook.js)",
+      "Bash(serena-hooks activate *)",
+      "Bash(node /root/.claude/plugins/cache/thedotmack/claude-mem/8.0.6/scripts/user-message-hook.js)",
+      "Bash(rtk wc *)",
+      "Bash(rtk ls *)",
+      "Bash(rtk read *)",
+      "Bash(rtk grep *)",
+      "Bash(rtk tsc *)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}

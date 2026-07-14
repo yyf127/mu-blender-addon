@@ -1,0 +1,608 @@
+using System;
+using System.Collections.Generic;
+using Client.Data.ATT;
+using Client.Main.Controls;
+using Client.Main.Controls.UI.Game.Skills;
+using Client.Main.Core.Utilities;
+using Client.Main.Objects;
+using Client.Main.Objects.Player;
+using Microsoft.Extensions.Logging;
+using Microsoft.Xna.Framework;
+using Microsoft.Xna.Framework.Input;
+
+namespace Client.Main.Scenes
+{
+    internal sealed class GameSceneSkillController
+    {
+        private const ushort TeleportSkillId = 6;
+        private const ushort TwisterSkillId = 8;
+        private const ushort HellFireSkillId = 10;
+        private const ushort InfernoSkillId = 14;
+        private const ushort EvilSpiritSkillId = 9;
+
+        private readonly GameScene _scene;
+        private readonly SkillQuickSlot _skillQuickSlot;
+        private readonly ILogger _logger;
+        private readonly Func<PlayerObject, bool> _isDuelAttackTarget;
+
+        private Core.Client.SkillEntryState _pendingSkill;
+        private ushort _pendingSkillTargetId;
+        private Vector2 _pendingSkillTargetLocation;
+        private bool _pendingSkillHasLocation;
+        private uint _pendingSkillRange;
+        private bool _pendingSkillIsArea;
+        private bool _pendingSkillTargetIsPlayer;
+        private readonly Dictionary<ushort, double> _nextSkillAllowedMs = new();
+        private byte _nextAreaSkillAnimationCounter;
+
+        public GameSceneSkillController(
+            GameScene scene,
+            SkillQuickSlot skillQuickSlot,
+            ILogger logger,
+            Func<PlayerObject, bool> isDuelAttackTarget)
+        {
+            _scene = scene ?? throw new ArgumentNullException(nameof(scene));
+            _skillQuickSlot = skillQuickSlot ?? throw new ArgumentNullException(nameof(skillQuickSlot));
+            _logger = logger;
+            _isDuelAttackTarget = isDuelAttackTarget ?? (_ => false);
+        }
+
+        public void Update()
+        {
+            UpdatePendingSkill();
+        }
+
+        public void ClearPending()
+        {
+            ClearPendingSkill();
+        }
+
+        public void HandleRightClickSkillUsage()
+        {
+            if (_scene.IsMouseInputConsumedThisFrame)
+                return;
+
+            if (IsMouseOverUi())
+                return;
+
+            var mouse = MuGame.Instance.Mouse;
+
+            // Allow continuous skill usage while holding right mouse button
+            // The cooldown system (TryConsumeSkillDelay) will rate-limit the casting
+            if (mouse.RightButton != ButtonState.Pressed)
+                return;
+
+            var skill = _skillQuickSlot.SelectedSkill;
+            if (skill == null)
+                return;
+
+            var hero = _scene.Hero;
+            if (hero == null || hero.IsDead || _scene.World is not WalkableWorldControl walkableForSkills)
+                return;
+
+            // Check if player is in SafeZone
+            var terrainFlags = walkableForSkills.Terrain.RequestTerrainFlag((int)hero.Location.X, (int)hero.Location.Y);
+            if (terrainFlags.HasFlag(TWFlags.SafeZone))
+            {
+                _logger?.LogDebug("Cannot use skill in SafeZone");
+                _scene.SetMouseInputConsumed();
+                return;
+            }
+
+            ClearPendingSkill();
+            uint allowedRange = SkillDatabase.GetSkillRange(skill.SkillId);
+
+            if (skill.SkillId == TeleportSkillId)
+            {
+                var mouseTile = new Vector2(walkableForSkills.MouseTileX, walkableForSkills.MouseTileY);
+                if (IsInSkillRange(mouseTile, allowedRange))
+                {
+                    UseAreaSkill(skill, 0, mouseTile);
+                }
+                else
+                {
+                    _logger?.LogDebug("Teleport target out of range. Target=({X},{Y}) Range={Range}",
+                        mouseTile.X, mouseTile.Y, allowedRange);
+                }
+
+                _scene.SetMouseInputConsumed();
+                return;
+            }
+
+            var hoveredTarget = GetHoveredSkillTarget();
+            if (IsAreaSkill(skill.SkillId))
+            {
+                if (skill.SkillId == HellFireSkillId || skill.SkillId == InfernoSkillId || skill.SkillId == EvilSpiritSkillId)
+                {
+                    UseAreaSkill(skill);
+                    _scene.SetMouseInputConsumed();
+                    return;
+                }
+
+                var skillTarget = hoveredTarget;
+                var mouseTile = new Vector2(walkableForSkills.MouseTileX, walkableForSkills.MouseTileY);
+                if (skillTarget == null)
+                {
+                    if (IsInSkillRange(mouseTile, allowedRange))
+                    {
+                        UseAreaSkill(skill, 0, mouseTile);
+                    }
+                    else
+                    {
+                        QueueAreaSkillCast(skill, mouseTile, allowedRange);
+                    }
+                }
+                else if (IsInSkillRange(skillTarget.Location, allowedRange))
+                {
+                    UseAreaSkill(skill, skillTarget.NetworkId);
+                }
+                else
+                {
+                    QueueSkillCast(skill, skillTarget, allowedRange, isAreaSkill: true);
+                }
+            }
+            else
+            {
+                if (hoveredTarget is MonsterObject targetMonster)
+                {
+                    if (IsInSkillRange(targetMonster.Location, allowedRange))
+                        UseSkillOnTarget(skill, targetMonster);
+                    else
+                        QueueSkillCast(skill, targetMonster, allowedRange, isAreaSkill: false);
+                }
+                else if (hoveredTarget is PlayerObject targetPlayer)
+                {
+                    if (IsInSkillRange(targetPlayer.Location, allowedRange))
+                        UseSkillOnPlayerTarget(skill, targetPlayer);
+                    else
+                        QueueSkillCast(skill, targetPlayer, allowedRange, isAreaSkill: false);
+                }
+            }
+
+            _scene.SetMouseInputConsumed();
+        }
+
+        private WalkerObject GetHoveredSkillTarget()
+        {
+            if (_scene.MouseHoverObject is MonsterObject monster)
+            {
+                if (!monster.IsDead && monster.World == _scene.World)
+                    return monster;
+                return null;
+            }
+
+            if (_scene.MouseHoverObject is PlayerObject player)
+            {
+                if (player != _scene.Hero &&
+                    !player.IsDead &&
+                    player.World == _scene.World &&
+                    _isDuelAttackTarget(player))
+                {
+                    return player;
+                }
+            }
+
+            return null;
+        }
+
+        private bool IsMouseOverUi()
+        {
+            return _scene.MouseHoverControl != null && _scene.MouseHoverControl != _scene.World;
+        }
+
+        private static bool IsAreaSkill(ushort skillId)
+        {
+            return SkillDatabase.IsAreaSkill(skillId);
+        }
+
+        private bool IsInSkillRange(Vector2 targetLocation, uint allowedRange)
+        {
+            var hero = _scene.Hero;
+            if (hero == null)
+                return false;
+
+            return allowedRange == 0 || Vector2.Distance(hero.Location, targetLocation) <= allowedRange;
+        }
+
+        private void QueueSkillCast(Core.Client.SkillEntryState skill, WalkerObject target, uint allowedRange, bool isAreaSkill)
+        {
+            var hero = _scene.Hero;
+            if (skill == null || target == null || hero == null)
+                return;
+
+            _pendingSkill = skill;
+            _pendingSkillTargetId = target.NetworkId;
+            _pendingSkillRange = allowedRange;
+            _pendingSkillIsArea = isAreaSkill;
+            _pendingSkillTargetIsPlayer = target is PlayerObject;
+
+            MoveHeroTowardsTarget(target.Location, force: true);
+        }
+
+        private void UpdatePendingSkill()
+        {
+            var hero = _scene.Hero;
+            if (_pendingSkill == null || hero == null || hero.IsDead)
+            {
+                ClearPendingSkill();
+                return;
+            }
+
+            if (_pendingSkill.SkillId == HellFireSkillId || _pendingSkill.SkillId == InfernoSkillId || _pendingSkill.SkillId == EvilSpiritSkillId)
+            {
+                ClearPendingSkill();
+                return;
+            }
+
+            if (_pendingSkill.SkillId == TeleportSkillId)
+            {
+                // Teleport is an instant skill; it shouldn't path towards the target.
+                ClearPendingSkill();
+                return;
+            }
+
+            if (_pendingSkillTargetId == 0 && !_pendingSkillHasLocation)
+            {
+                ClearPendingSkill();
+                return;
+            }
+
+            if (_skillQuickSlot.SelectedSkill == null || _skillQuickSlot.SelectedSkill.SkillId != _pendingSkill.SkillId)
+            {
+                ClearPendingSkill();
+                return;
+            }
+
+            if (_scene.World is not WalkableWorldControl walkableWorld)
+            {
+                ClearPendingSkill();
+                return;
+            }
+
+            var terrainFlags = walkableWorld.Terrain.RequestTerrainFlag((int)hero.Location.X, (int)hero.Location.Y);
+            if (terrainFlags.HasFlag(TWFlags.SafeZone))
+            {
+                ClearPendingSkill();
+                return;
+            }
+
+            if (_pendingSkillHasLocation)
+            {
+                if (IsInSkillRange(_pendingSkillTargetLocation, _pendingSkillRange))
+                {
+                    bool sent = UseAreaSkill(_pendingSkill, 0, _pendingSkillTargetLocation);
+                    if (sent)
+                        ClearPendingSkill();
+                }
+                else
+                {
+                    MoveHeroTowardsTarget(_pendingSkillTargetLocation, force: false);
+                }
+                return;
+            }
+
+            if (!walkableWorld.WalkerObjectsById.TryGetValue(_pendingSkillTargetId, out var walker))
+            {
+                ClearPendingSkill();
+                return;
+            }
+
+            if (_pendingSkillTargetIsPlayer)
+            {
+                if (walker is not PlayerObject targetPlayer || targetPlayer.IsDead || !_isDuelAttackTarget(targetPlayer))
+                {
+                    ClearPendingSkill();
+                    return;
+                }
+
+                if (IsInSkillRange(targetPlayer.Location, _pendingSkillRange))
+                {
+                    bool sent = _pendingSkillIsArea
+                        ? UseAreaSkill(_pendingSkill, targetPlayer.NetworkId)
+                        : UseSkillOnPlayerTarget(_pendingSkill, targetPlayer);
+                    if (sent)
+                        ClearPendingSkill();
+                }
+                else
+                {
+                    MoveHeroTowardsTarget(targetPlayer.Location, force: false);
+                }
+                return;
+            }
+
+            if (walker is not MonsterObject targetMonster || targetMonster.IsDead || targetMonster.World != _scene.World)
+            {
+                ClearPendingSkill();
+                return;
+            }
+
+            if (IsInSkillRange(targetMonster.Location, _pendingSkillRange))
+            {
+                bool sent = _pendingSkillIsArea
+                    ? UseAreaSkill(_pendingSkill, targetMonster.NetworkId)
+                    : UseSkillOnTarget(_pendingSkill, targetMonster);
+                if (sent)
+                    ClearPendingSkill();
+            }
+            else
+            {
+                MoveHeroTowardsTarget(targetMonster.Location, force: false);
+            }
+        }
+
+        private void ClearPendingSkill()
+        {
+            _pendingSkill = null;
+            _pendingSkillTargetId = 0;
+            _pendingSkillTargetLocation = Vector2.Zero;
+            _pendingSkillHasLocation = false;
+            _pendingSkillRange = 0;
+            _pendingSkillIsArea = false;
+            _pendingSkillTargetIsPlayer = false;
+        }
+
+        private void MoveHeroTowardsTarget(Vector2 targetLocation, bool force)
+        {
+            var hero = _scene.Hero;
+            if (hero == null)
+                return;
+
+            if (!force && (hero.IsMoving || hero.MovementIntent))
+                return;
+
+            bool usePathfinding = !hero.IsAttackOrSkillAnimationPlaying();
+            hero.MoveTo(targetLocation, sendToServer: true, usePathfinding: usePathfinding);
+        }
+
+        private bool UseSkillOnTarget(Core.Client.SkillEntryState skill, MonsterObject target)
+        {
+            var hero = _scene.Hero;
+            if (skill == null || target == null || hero == null)
+                return false;
+
+            if (hero.IsDead)
+                return false;
+
+            if (!TryBeginSkillCast(skill, hero))
+                return false;
+
+            hero.FaceTowards(target.Location, immediate: true);
+
+            _logger?.LogInformation("Using targeted skill {SkillId} (Level {Level}) on target {TargetId}",
+                skill.SkillId, skill.SkillLevel, target.NetworkId);
+
+            _ = MuGame.Network.GetCharacterService().SendSkillRequestAsync(
+                skill.SkillId,
+                target.NetworkId);
+
+            return true;
+        }
+
+        private bool UseSkillOnPlayerTarget(Core.Client.SkillEntryState skill, PlayerObject target)
+        {
+            var hero = _scene.Hero;
+            if (skill == null || target == null || hero == null)
+                return false;
+
+            if (hero.IsDead || target.IsDead)
+                return false;
+
+            if (!_isDuelAttackTarget(target))
+                return false;
+
+            if (!TryBeginSkillCast(skill, hero))
+                return false;
+
+            hero.FaceTowards(target.Location, immediate: true);
+
+            _logger?.LogInformation("Using targeted skill {SkillId} (Level {Level}) on duel target player {TargetId}",
+                skill.SkillId, skill.SkillLevel, target.NetworkId);
+
+            _ = MuGame.Network.GetCharacterService().SendSkillRequestAsync(
+                skill.SkillId,
+                target.NetworkId);
+
+            return true;
+        }
+
+        private bool UseAreaSkill(Core.Client.SkillEntryState skill, ushort extraTargetId = 0, Vector2? targetLocationOverride = null)
+        {
+            var hero = _scene.Hero;
+            if (skill == null || hero == null)
+                return false;
+
+            if (hero.IsDead)
+                return false;
+
+            Vector2 targetTile = hero.Location;
+            if (skill.SkillId != HellFireSkillId && skill.SkillId != InfernoSkillId && skill.SkillId != EvilSpiritSkillId)
+            {
+                if (targetLocationOverride.HasValue)
+                {
+                    targetTile = targetLocationOverride.Value;
+                }
+                else if (_scene.World is WalkableWorldControl world)
+                {
+                    if (extraTargetId != 0 && world.TryGetWalkerById(extraTargetId, out var target))
+                        targetTile = target.Location;
+                    else
+                        targetTile = new Vector2(world.MouseTileX, world.MouseTileY);
+                }
+            }
+
+            byte targetX = (byte)Math.Clamp((int)targetTile.X, 0, Constants.TERRAIN_SIZE - 1);
+            byte targetY = (byte)Math.Clamp((int)targetTile.Y, 0, Constants.TERRAIN_SIZE - 1);
+            byte requestTargetX = targetX;
+            byte requestTargetY = targetY;
+
+            if (skill.SkillId == TeleportSkillId)
+            {
+                if (_scene.World is WorldControl worldForTeleport &&
+                    !worldForTeleport.IsWalkable(new Vector2(targetX, targetY)))
+                {
+                    _logger?.LogDebug("Teleport target ({X},{Y}) is not walkable.", targetX, targetY);
+                    return false;
+                }
+            }
+
+            if (!TryBeginSkillCast(skill, hero))
+                return false;
+
+            hero.FaceTowards(new Vector2(targetX, targetY), immediate: true);
+
+            var characterState = MuGame.Network?.GetCharacterState();
+
+            if (skill.SkillId == TwisterSkillId)
+            {
+                requestTargetX = (byte)Math.Clamp((int)hero.Location.X, 0, Constants.TERRAIN_SIZE - 1);
+                requestTargetY = (byte)Math.Clamp((int)hero.Location.Y, 0, Constants.TERRAIN_SIZE - 1);
+            }
+
+            if (skill.SkillId == TeleportSkillId)
+            {
+                _logger?.LogInformation("Using teleport skill {SkillId} (Level {Level}) to position ({X},{Y})",
+                    skill.SkillId, skill.SkillLevel, targetX, targetY);
+
+                characterState?.BeginTeleport();
+
+                hero.StopMovement();
+                hero.Hidden = true; // Hide hero until server responds
+
+                _ = MuGame.Network.GetCharacterService().SendEnterGateRequestAsync(0, targetX, targetY);
+                return true;
+            }
+
+            byte animationCounter = NextAreaSkillAnimationCounter();
+            if (characterState != null)
+            {
+                characterState.LastAreaSkillId = skill.SkillId;
+                characterState.LastAreaSkillTargetX = requestTargetX;
+                characterState.LastAreaSkillTargetY = requestTargetY;
+                characterState.LastAreaSkillAnimationCounter = animationCounter;
+                characterState.LastAreaSkillSentAtMs = GetNowMs();
+            }
+
+            if (extraTargetId != 0)
+            {
+                _logger?.LogInformation("Using skill {SkillId} (Level {Level}) at position ({X},{Y}) with target {TargetId}",
+                    skill.SkillId, skill.SkillLevel, requestTargetX, requestTargetY, extraTargetId);
+            }
+            else
+            {
+                _logger?.LogInformation("Using area skill {SkillId} (Level {Level}) at position ({X},{Y})",
+                    skill.SkillId, skill.SkillLevel, requestTargetX, requestTargetY);
+            }
+
+            float angleZ = MathHelper.WrapAngle(hero.Angle.Z);
+            if (angleZ < 0f)
+            {
+                angleZ += MathHelper.TwoPi;
+            }
+            byte rotation = (byte)(angleZ / MathHelper.TwoPi * 256f);
+
+            _ = MuGame.Network.GetCharacterService().SendAreaSkillRequestAsync(
+                skill.SkillId,
+                requestTargetX,
+                requestTargetY,
+                rotation,
+                extraTargetId: extraTargetId,
+                animationCounter: animationCounter);
+
+            return true;
+        }
+
+        private void QueueAreaSkillCast(Core.Client.SkillEntryState skill, Vector2 targetLocation, uint allowedRange)
+        {
+            var hero = _scene.Hero;
+            if (skill == null || hero == null)
+                return;
+
+            _pendingSkill = skill;
+            _pendingSkillTargetId = 0;
+            _pendingSkillTargetLocation = targetLocation;
+            _pendingSkillHasLocation = true;
+            _pendingSkillRange = allowedRange;
+            _pendingSkillIsArea = true;
+            _pendingSkillTargetIsPlayer = false;
+
+            MoveHeroTowardsTarget(targetLocation, force: true);
+        }
+
+        private bool TryBeginSkillCast(Core.Client.SkillEntryState skill, PlayerObject hero)
+        {
+            if (hero.IsAttackOrSkillAnimationPlaying())
+                return false;
+
+            if (!TryConsumeSkillDelay(skill.SkillId))
+                return false;
+
+            // Check if player has enough mana and AG to use the skill
+            var characterState = MuGame.Network?.GetCharacterState();
+            if (characterState != null)
+            {
+                ushort manaCost = SkillDatabase.GetSkillManaCost(skill.SkillId);
+                ushort agCost = SkillDatabase.GetSkillAGCost(skill.SkillId);
+
+                if (characterState.CurrentMana < manaCost)
+                {
+                    _logger?.LogDebug("Not enough mana to use skill {SkillId}. Required: {Required}, Current: {Current}",
+                        skill.SkillId, manaCost, characterState.CurrentMana);
+                    return false;
+                }
+
+                if (characterState.CurrentAbility < agCost)
+                {
+                    _logger?.LogDebug("Not enough AG to use skill {SkillId}. Required: {Required}, Current: {Current}",
+                        skill.SkillId, agCost, characterState.CurrentAbility);
+                    return false;
+                }
+            }
+
+            bool isInSafeZone = false;
+            if (_scene.World is WalkableWorldControl walkableWorld)
+            {
+                var flags = walkableWorld.Terrain.RequestTerrainFlag((int)hero.Location.X, (int)hero.Location.Y);
+                isInSafeZone = flags.HasFlag(TWFlags.SafeZone);
+            }
+
+            var action = hero.GetSkillAction(skill.SkillId, isInSafeZone);
+            hero.PlayAction((ushort)action);
+            hero.TriggerVehicleSkillAnimation();
+            return true;
+        }
+
+        private bool TryConsumeSkillDelay(ushort skillId)
+        {
+            int delayMs = SkillDatabase.GetSkillCooldown(skillId);
+            if (delayMs <= 0)
+                return true;
+
+            double now = GetNowMs();
+            if (_nextSkillAllowedMs.TryGetValue(skillId, out double nextAllowed) && now < nextAllowed)
+                return false;
+
+            _nextSkillAllowedMs[skillId] = now + delayMs;
+            return true;
+        }
+
+        private static double GetNowMs()
+        {
+            var gameTime = MuGame.Instance?.GameTime;
+            if (gameTime != null)
+                return gameTime.TotalGameTime.TotalMilliseconds;
+
+            return Environment.TickCount64;
+        }
+
+        private byte NextAreaSkillAnimationCounter()
+        {
+            // Mirrors original client behavior: a small rolling serial number is used
+            // to tie AreaSkillHit packets to the AreaSkill animation.
+            _nextAreaSkillAnimationCounter++;
+            if (_nextAreaSkillAnimationCounter > 50)
+                _nextAreaSkillAnimationCounter = 1;
+
+            return _nextAreaSkillAnimationCounter;
+        }
+    }
+}

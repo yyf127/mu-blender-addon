@@ -1,0 +1,144 @@
+﻿using System.Text;
+using Client.Main.Controllers;
+using Client.Main.Content;
+using Client.Main.Models;
+using Microsoft.Xna.Framework;
+
+namespace Client.Main.Controls.UI
+{
+    public class DebugPanel : UIControl
+    {
+        private LabelControl _fpsLabel;
+        private LabelControl _mousePosLabel;
+        private LabelControl _playerCordsLabel;
+        private LabelControl _mapTileLabel;
+        private LabelControl _effectsStatusLabel;
+        private LabelControl _objectCursorLabel;
+        private LabelControl _tileFlagsLabel;
+        private LabelControl _performanceMetricsLabel;
+        private LabelControl _bmdMetricsLabel;    // New label for BMD buffer metrics
+        private LabelControl _batchSortingLabel;   // NEW: Batch sorting status
+        private LabelControl _lightingStatusLabel; // NEW: Lighting mode status
+        private double _updateTimer = 0;
+        private const double UPDATE_INTERVAL_MS = 100; // 100ms
+        private StringBuilder _sb = new StringBuilder(350); // Increased capacity for new metrics
+
+        public DebugPanel()
+        {
+            Align = ControlAlign.Top | ControlAlign.Right;
+            Margin = new Margin { Top = 10, Right = 10 };
+            Padding = new Margin { Top = 15, Left = 15 };
+            ControlSize = new Point(400, 300); // Increased size for lighting + pooling metrics
+            BackgroundColor = Color.Black * 0.6f;
+            BorderColor = Color.White * 0.3f;
+            BorderThickness = 2;
+
+            var posX = Padding.Left;
+            var posY = Padding.Top;
+            var labelHeight = 20;
+
+            Controls.Add(_fpsLabel = new LabelControl { Text = "FPS: {0}", TextColor = Color.LightGreen, X = posX, Y = posY });
+            Controls.Add(_mousePosLabel = new LabelControl { Text = "Mouse Position - X: {0}, Y:{1}", TextColor = Color.LightBlue, X = posX, Y = posY += labelHeight });
+            Controls.Add(_playerCordsLabel = new LabelControl { Text = "Player Cords - X: {0}, Y:{1}", TextColor = Color.LightCoral, X = posX, Y = posY += labelHeight });
+            Controls.Add(_mapTileLabel = new LabelControl { Text = "MAP Tile - X: {0}, Y:{1}", TextColor = Color.LightYellow, X = posX, Y = posY += labelHeight });
+            Controls.Add(_effectsStatusLabel = new LabelControl { Text = "FXAA: {0} - AlphaRGB:{1}", TextColor = Color.Yellow, X = posX, Y = posY += labelHeight });
+            Controls.Add(_objectCursorLabel = new LabelControl { Text = "Cursor Object: {0}", TextColor = Color.CadetBlue, X = posX, Y = posY += labelHeight });
+            Controls.Add(_tileFlagsLabel = new LabelControl { Text = "Tile Flags: {0}", TextColor = Color.Lime, X = posX, Y = posY += labelHeight });
+            Controls.Add(_lightingStatusLabel = new LabelControl { Text = "Lighting: {0}", TextColor = Color.White, X = posX, Y = posY += labelHeight });
+            Controls.Add(_performanceMetricsLabel = new LabelControl { Text = "Perf: {0}", TextColor = Color.OrangeRed, X = posX, Y = posY += labelHeight });
+            Controls.Add(_bmdMetricsLabel = new LabelControl { Text = "BMD: {0}", TextColor = Color.LightSkyBlue, X = posX, Y = posY += labelHeight });
+            Controls.Add(_batchSortingLabel = new LabelControl { Text = "Batch: {0}", TextColor = Color.Magenta, X = posX, Y = posY += labelHeight });
+        }
+
+        public override void Update(GameTime gameTime)
+        {
+            base.Update(gameTime);
+
+            if (!Visible) return;
+
+            _updateTimer += gameTime.ElapsedGameTime.TotalMilliseconds;
+
+            if (_updateTimer >= UPDATE_INTERVAL_MS)
+            {
+                _updateTimer = 0;
+
+                _fpsLabel.Text = $"FPS: {(int)FPSCounter.Instance.FPS_AVG}, UPS: {(int)UPSCounter.Instance.UPS_AVG}";
+
+                Point screenMouse = MuGame.Instance.Mouse.Position;
+                Point uiMouse = MuGame.Instance.UiMouseState.Position;
+
+                _mousePosLabel.Text = $"Mouse Screen (X:{screenMouse.X}, Y:{screenMouse.Y}) UI (X:{uiMouse.X}, Y:{uiMouse.Y})";
+
+                var fxaa = GraphicsManager.Instance.IsFXAAEnabled ? "ON" : "OFF";
+                var alphargb = GraphicsManager.Instance.IsFXAAEnabled ? "ON" : "OFF"; ;
+                _effectsStatusLabel.Text = $"FXAA: {fxaa} - AlphaRGB: {alphargb}";
+
+                var cursorObj = World?.Scene?.MouseHoverObject != null ? World.Scene.MouseHoverObject.GetType().Name : "N/A";
+                _objectCursorLabel.Text = $"Cursor Object: {cursorObj}";
+
+                if (World is WalkableWorldControl walkableWorld && walkableWorld.Walker != null)
+                {
+                    _playerCordsLabel.Visible = true;
+                    _mapTileLabel.Visible = true;
+                    _tileFlagsLabel.Visible = true;
+                    _performanceMetricsLabel.Visible = true;
+                    _bmdMetricsLabel.Visible = true;
+                    _lightingStatusLabel.Visible = true;
+
+                    _playerCordsLabel.Text = $"Player Cords - X: {walkableWorld.Walker.Location.X}, Y: {walkableWorld.Walker.Location.Y}";
+
+                    _mapTileLabel.Text = $"MAP Tile - X: {walkableWorld.MouseTileX}, Y: {walkableWorld.MouseTileY}";
+
+                    var flags = walkableWorld.Terrain.RequestTerrainFlag((int)walkableWorld.Walker.Location.X,
+                                                                         (int)walkableWorld.Walker.Location.Y);
+                    _tileFlagsLabel.Text = $"Tile Flags: {flags}";
+
+                    bool terrainGpu = walkableWorld.Terrain?.IsGpuTerrainLighting == true;
+                    bool shaderAvailable = walkableWorld.Terrain?.IsDynamicLightingShaderAvailable == true;
+                    bool objectsGpu = Constants.ENABLE_DYNAMIC_LIGHTING_SHADER && GraphicsManager.Instance.DynamicLightingEffect != null;
+                    _sb.Clear()
+                      .Append("Lighting: Terrain=")
+                      .Append(terrainGpu ? "GPU" : "CPU")
+                      .Append(shaderAvailable ? "" : " (shader missing)")
+                      .Append(" | Objects=")
+                      .Append(objectsGpu ? "GPU" : "CPU");
+                    _lightingStatusLabel.Text = _sb.ToString();
+
+                    // Update terrain performance metrics display
+                    var terrainMetrics = walkableWorld.Terrain.FrameMetrics;
+                    _sb.Clear()
+                       .Append($"Terrain: Drw:{terrainMetrics.DrawCalls} ")
+                       .Append($"Tri:{terrainMetrics.DrawnTriangles} ")
+                       .Append($"Blk:{terrainMetrics.DrawnBlocks} ")
+                       .Append($"Cel:{terrainMetrics.DrawnCells}");
+                    _performanceMetricsLabel.Text = _sb.ToString();
+
+                    // Update BMD buffer metrics
+                    var bmd = BMDLoader.Instance;
+                    _sb.Clear()
+                      .Append($"BMD: VB:{bmd.LastFrameVBUpdates} IB:{bmd.LastFrameIBUploads} ")
+                      .Append($"Vtx:{bmd.LastFrameVerticesTransformed} Mesh:{bmd.LastFrameMeshesProcessed} ")
+                      .Append($"Cache:{bmd.LastFrameCacheHits}/{bmd.LastFrameCacheMisses}");
+                    _bmdMetricsLabel.Text = _sb.ToString();
+
+                    // Update batch sorting status
+                    _sb.Clear()
+                      .Append($"Batch Sort: {(Constants.ENABLE_BATCH_OPTIMIZED_SORTING ? "ON" : "OFF")} ")
+                      .Append($"(Model grouping for state reduction)");
+                    _batchSortingLabel.Text = _sb.ToString();
+                    _batchSortingLabel.Visible = true;
+                }
+                else
+                {
+                    _playerCordsLabel.Visible = false;
+                    _mapTileLabel.Visible = false;
+                    _tileFlagsLabel.Visible = false;
+                    _performanceMetricsLabel.Visible = false;
+                    _bmdMetricsLabel.Visible = false;
+                    _batchSortingLabel.Visible = false;
+                    _lightingStatusLabel.Visible = false;
+                }
+            }
+        }
+    }
+}

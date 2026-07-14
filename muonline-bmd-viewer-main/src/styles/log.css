@@ -1,0 +1,162 @@
+/* ── Log bar ── */
+.log-bar {
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  background: rgba(4, 8, 16, 0.98);
+  border-top: 1px solid rgba(49, 215, 255, 0.1);
+  position: relative;
+  min-height: 36px;
+  overflow: hidden;
+}
+
+.log-bar-resize-handle {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 6px;
+  cursor: ns-resize;
+  z-index: 10;
+}
+
+.log-bar-resize-handle::after {
+  content: '';
+  position: absolute;
+  top: 2px;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: transparent;
+  transition: background 0.18s ease;
+}
+
+.log-bar-resize-handle:hover::after {
+  background: rgba(49, 215, 255, 0.4);
+}
+
+.log-bar-header {
+  flex-shrink: 0;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0 0.75rem 0 1rem;
+}
+
+.log-bar-label {
+  font-size: 0.68rem;
+  font-family: var(--font-display);
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  color: var(--text-dim);
+  flex-shrink: 0;
+  padding-right: 0.75rem;
+  border-right: 1px solid rgba(157, 185, 224, 0.14);
+}
+
+.log-bar-status {
+  flex: 1;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-width: 0;
+}
+
+.log-bar-controls {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  flex-shrink: 0;
+}
+
+.log-bar-btn {
+  padding: 0.22rem 0.6rem;
+  font-size: 0.7rem;
+  font-family: var(--font-main);
+  font-weight: 600;
+  border-radius: 6px;
+  border: 1px solid rgba(157, 185, 224, 0.18);
+  background: rgba(14, 22, 38, 0.8);
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: all 0.16s ease;
+  letter-spacing: 0.02em;
+}
+
+.log-bar-btn:hover {
+  border-color: rgba(49, 215, 255, 0.45);
+  color: var(--text-main);
+  background: rgba(20, 34, 58, 0.9);
+}
+
+.log-bar-btn--reset {
+  border-color: rgba(245, 158, 11, 0.22);
+  color: rgba(245, 158, 11, 0.7);
+}
+
+.log-bar-btn--reset:hover {
+  border-color: rgba(245, 158, 11, 0.6);
+  color: var(--accent-secondary);
+  background: rgba(30, 20, 8, 0.9);
+}
+
+/* Log output area */
+.log-output {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 0.18rem 0.75rem 0.4rem 1rem;
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  line-height: 1.5;
+}
+
+.log-output::-webkit-scrollbar {
+  width: 5px;
+}
+
+.log-output::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.log-output::-webkit-scrollbar-thumb {
+  background: rgba(83, 109, 147, 0.5);
+  border-radius: 4px;
+}
+
+.log-entry {
+  display: flex;
+  gap: 0.6rem;
+  align-items: baseline;
+  padding: 0.06rem 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.03);
+}
+
+.log-time {
+  flex-shrink: 0;
+  color: var(--text-dim);
+  font-size: 0.7rem;
+  opacity: 0.7;
+  user-select: none;
+}
+
+.log-msg {
+  flex: 1;
+  min-width: 0;
+  word-break: break-all;
+  white-space: pre-wrap;
+}
+
+.log-entry--info .log-msg {
+  color: var(--text-muted);
+}
+
+.log-entry--warn .log-msg {
+  color: var(--accent-secondary);
+}
+
+.log-entry--error .log-msg {
+  color: var(--accent-danger);
+}

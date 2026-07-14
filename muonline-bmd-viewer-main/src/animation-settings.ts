@@ -1,0 +1,1 @@
+export const DEFAULT_ANIMATION_PLAYBACK_SPEED = 0.2;
