@@ -4,9 +4,9 @@
 bl_info = {
     "name": "MU Online Blender Tools",
     "author": "MU Blender Tools Contributors",
-    "version": (0, 1, 0),
+    "version": (0, 1, 1),
     "blender": (4, 0, 0),
-    "location": "File > Import > MU Model / MU Terrain / MU World > MU Scene",
+    "location": "File > Import > MU Model / MU Terrain / MU World",
     "description": "Import, edit, and export MU Online client assets (.bmd, terrain, textures, animations)",
     "category": "Import-Export",
     "support": "COMMUNITY",

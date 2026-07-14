@@ -151,7 +151,7 @@ class MU_PT_import_panel(Panel):
         col.prop(settings, "chunk_terrain")
 
         box = layout.box()
-        box.label(text="Advanced", icon="TOOLS")
+        box.label(text="Advanced", icon="SETTINGS")
         box.prop(settings, "data_folder")
         box.prop(settings, "debug")
 

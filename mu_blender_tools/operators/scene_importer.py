@@ -319,7 +319,7 @@ class MU_OT_import_world(Operator):
         layout.prop(self, "world_number")
 
         box = layout.box()
-        box.label(text="Import Options", icon="SETTINGS")
+        box.label(text="Import Options", icon="OPTIONS")
         box.prop(self, "import_terrain")
         box.prop(self, "import_objects")
 
@@ -332,7 +332,7 @@ class MU_OT_import_world(Operator):
             worlds = _scan_available_worlds(data_dir)
             if worlds:
                 box = layout.box()
-                box.label(text=f"Available worlds: {', '.join(str(w) for w in worlds)}", icon="WORLD")
+                box.label(text=f"Available worlds: {', '.join(str(w) for w in worlds)}", icon="SCENE_DATA")
 
     # ── Execute ────────────────────────────────────────────────────
 
