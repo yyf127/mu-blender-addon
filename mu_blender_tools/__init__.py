@@ -6,9 +6,12 @@ bl_info = {
     "author": "MU Blender Tools Contributors",
     "version": (0, 1, 0),
     "blender": (4, 0, 0),
-    "location": "File > Import > MU Model / MU Terrain / MU World / MU Scene",
-    "description": "Import, edit, and export MU Online client assets",
+    "location": "File > Import > MU Model / MU Terrain / MU World > MU Scene",
+    "description": "Import, edit, and export MU Online client assets (.bmd, terrain, textures, animations)",
     "category": "Import-Export",
+    "support": "COMMUNITY",
+    "doc_url": "https://github.com/yyf127/mu-blender-addon",
+    "tracker_url": "https://github.com/yyf127/mu-blender-addon/issues",
 }
 
 

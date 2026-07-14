@@ -2,29 +2,59 @@
 
 ## Requirements
 
-- **Blender 4.0** or newer
+- **Blender 4.0** or newer (tested up to 5.1)
 - **Python 3.11+** (bundled with Blender)
 - No external Python packages required
 
-## Quick Install (Blender)
+## Quick Install (Blender) — Recommended
 
-1. **Download the addon**
-   - Clone this repository: `git clone https://github.com/yyf127/mu-blender-addon.git`
-   - Or download the ZIP archive
+### Method A: Build the ZIP (easiest)
 
-2. **Install in Blender**
-   - Open Blender
-   - Go to **Edit → Preferences** (or **Blender → Settings** on macOS)
-   - Switch to the **Add-ons** tab
-   - Click **Install from Disk** (top-right)
-   - Select the `mu-blender-addon` folder or a ZIP containing it
-   - Search for "MU Online" in the addon list
-   - Enable the checkbox next to **"MU Online Blender Tools"**
+Run the build script from the repository root:
 
-3. **Verify installation**
-   - Press `N` in the 3D View to open the sidebar
-   - You should see a **MU** tab
-   - Go to **File → Import** — you should see three MU Online options
+```bash
+python build_addon.py
+```
+
+This creates `mu_blender_tools.zip` in the current directory. Then:
+
+1. Open Blender → **Edit → Preferences** → **Add-ons** tab
+2. Click **Install from Disk** (top-right)
+3. Select the `mu_blender_tools.zip` file
+4. Search for "MU Online" and enable the checkbox
+
+### Method B: Manual folder install
+
+1. Copy the `mu_blender_tools/` folder (the one containing `__init__.py`)
+2. Paste it into Blender's addons directory:
+   - **Windows**: `%APPDATA%\Blender Foundation\Blender\5.1\scripts\addons\`
+   - **macOS**: `~/Library/Application Support/Blender/5.1/scripts/addons/`
+   - **Linux**: `~/.config/blender/5.1/scripts/addons/`
+3. Restart Blender
+4. Enable the addon in **Preferences → Add-ons**
+
+### ⚠️ Important: ZIP structure
+
+If you download the repository ZIP from GitHub, **do NOT** install it directly.
+The GitHub ZIP wraps everything in a `mu-blender-addon/` folder which Blender
+cannot read.  Always use the build script (Method A) or copy only the
+`mu_blender_tools/` folder (Method B).
+
+Correct structure inside the ZIP that Blender expects:
+```
+mu_blender_tools.zip
+├── mu_blender_tools/
+│   ├── __init__.py       ← Required by Blender
+│   ├── readers/
+│   ├── builders/
+│   ├── ...
+```
+
+## Verify installation
+
+- Press `N` in the 3D View to open the sidebar
+- You should see a **MU** tab
+- Go to **File → Import** — you should see three MU Online options
 
 ## Finding Your MU Online Data
 
