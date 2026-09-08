@@ -1,5 +1,5 @@
-基于项目https://github.com/xulek/muonline-bmd-viewer、https://github.com/xulek/muonline、https://github.com/VDraven/MuOnline-WorldEditor
-通过VScode+AI开发的奇迹客户端资源导入blender与blender资源导出奇迹客户端资源
-io_scene_muonline主要是BMD导入blender导出插件，还有BMD转换的FBX、GLB导出为BMD，选择对应模型的骨架再导出
-muonline_map_editor地图编辑，大陆目前只能移动或者复制大陆上的物体，增加新物体需要改main源码，或者替换现有物体，其他地图可以在object160以内的添加物体，就是不要跟object内的其他文件覆盖了
-mu_bmd_exporter.py主要用于导出blender及其他的格式导入的导出为静态物体
+基于项目https://github.com/xulek/muonline-bmd-viewer、https://github.com/xulek/muonline、https://github.com/VDraven/MuOnline-WorldEditor  
+通过VScode+AI开发的奇迹客户端资源导入blender与blender资源导出奇迹客户端资源  
+io_scene_muonline主要是BMD导入blender导出插件，还有BMD转换的FBX、GLB导出为BMD，选择对应模型的骨架再导出  
+muonline_map_editor地图编辑，大陆目前只能移动或者复制大陆上的物体，增加新物体需要改main源码，或者替换现有物体，其他地图可以在object160以内的添加物体，就是不要跟object内的其他文件覆盖了  
+mu_bmd_exporter.py主要用于导出blender及其他的格式导入的导出为静态物体  
