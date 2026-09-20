@@ -3,4 +3,12 @@
 io_scene_muonline主要是BMD导入blender导出插件，还有BMD转换的FBX、GLB导出为BMD，选择对应模型的骨架再导出  
 muonline_map_editor地图编辑，大陆目前只能移动或者复制大陆上的物体，增加新物体需要改main源码，或者替换现有物体，其他地图可以在object160以内的添加物体，就是不要跟object内的其他文件覆盖了  
 mu_bmd_exporter.py主要用于导出blender及其他的格式导入的导出为静态物体  
-2026-09-14：去掉对Pillow依赖，原来blender需要先安装Pillow，才能正常安装与使用
+2026-09-14：去掉对Pillow依赖，原来blender需要先安装Pillow，才能正常安装与使用  
+简易教程B站  
+https://www.bilibili.com/video/BV1fqYE6vEN4/  
+https://www.bilibili.com/video/BV1YmYE6fE6V/  
+https://www.bilibili.com/video/BV1XSYE64Ep2/  
+油管  
+https://youtu.be/AyH2n-B19So?si=3ouOkHyKfhlTRkpJ  
+https://youtu.be/SQcpDMTzsDI?si=u8CSv2RXkBvN31QZ  
+https://youtu.be/FAO7wPvykdg?si=8fmX-s6cKM4Tpclg
